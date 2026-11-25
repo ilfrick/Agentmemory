@@ -32,9 +32,13 @@ def test_sync_turn_retains_the_turn(provider):
     assert len(fake.retains) == 1
     call = fake.retains[0]
     assert call["bank_id"] == "team"
-    assert call["document_id"] == "session-1"  # stable id + append on a capable API
+    # The append-capable API target is translated to a per-process overwrite
+    # document by the durable local outbox, so replay cannot overwrite an
+    # earlier session after a reconnect.
+    assert instance._resolve_retain_target(instance._document_id) == ("session-1", "append")
+    assert call["document_id"] == instance._document_id
     item = _retain_item(fake)
-    assert item["update_mode"] == "append"
+    assert "update_mode" not in item
     assert "hermes" in item["tags"] and "session:session-1" in item["tags"]
     assert _messages_of(fake) == ["User: what is my name?", "Assistant: Ada."]
 
