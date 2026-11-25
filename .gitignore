@@ -1,0 +1,23 @@
+# Secrets and local configuration
+.env
+*.env
+config.json
+**/config.json
+
+# Local retained data / outbox
+*.sqlite
+*.sqlite3
+*.sqlite-*
+*.sqlite3-*
+*.db
+.hindsight/
+
+# Python / test artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+dist/
+build/
+*.egg-info/
