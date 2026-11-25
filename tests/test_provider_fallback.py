@@ -17,7 +17,7 @@ class OfflineClient:
 
     async def aretain_batch(self, **kwargs):
         if self.local_store is not None:
-            self.saw_local_before_remote = self.local_store.get_document("session:session-1:session-1") is not None
+            self.saw_local_before_remote = bool(self.local_store.search("cobalt kite"))
         self.retains.append(kwargs)
         return types.SimpleNamespace(operations=[])
 
@@ -38,7 +38,7 @@ class VerifiedOfflineClient(OfflineClient):
 
     async def aretain_batch(self, **kwargs):
         if self.local_store is not None:
-            self.saw_local_before_remote = self.local_store.get_document("session:session-1:session-1") is not None
+            self.saw_local_before_remote = bool(self.local_store.search("cobalt kite"))
         self.retains.append(kwargs)
         bank_id = kwargs["bank_id"]
         document_id = kwargs.get("document_id", "tool-retain-document")
@@ -70,12 +70,12 @@ def test_automatic_turn_is_durable_locally_before_remote_attempt(provider, tmp_p
     instance._fallback_store = LocalFallbackStore(tmp_path / "fallback.sqlite3")
     client.local_store = instance._fallback_store
     instance.sync_turn("remember the cobalt kite", "I will remember it.")
-    document = instance._fallback_store.get_document("session:session-1:session-1")
+    documents = instance._fallback_store.search("cobalt kite")
     instance._retain_queue.join()
     instance.shutdown()
 
-    assert document is not None
-    assert "cobalt kite" in document.text
+    assert len(documents) == 1
+    assert "cobalt kite" in documents[0].text
     assert len(client.retains) == 1
     assert client.saw_local_before_remote
 
@@ -191,6 +191,22 @@ def test_offline_tool_write_has_one_primary_path_and_replays_after_reconnect(pro
     operation = instance._fallback_store.operations()[0]
     assert client.retains[0].get("operation_id") == operation.operation_id
     assert instance._fallback_store.next_operation() is None
+    instance.shutdown()
+
+
+def test_buffered_turn_flush_is_persisted_before_remote_queue(provider, tmp_path, monkeypatch):
+    instance, _client = _with_store(provider, tmp_path, monkeypatch, {"retain_every_n_turns": 2})
+    queued = []
+    monkeypatch.setattr(instance, "_enqueue_retain", queued.append)
+
+    instance.sync_turn("remember the cobalt kite", "I will remember it.")
+    instance._flush_buffered_turns("flush-on-switch")
+
+    documents = instance._fallback_store.search("cobalt kite")
+    assert len(documents) == 1
+    assert "cobalt kite" in documents[0].text
+    assert instance._fallback_store.next_operation() is not None
+    assert len(queued) == 1
     instance.shutdown()
 
 

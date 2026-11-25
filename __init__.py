@@ -2480,8 +2480,45 @@ class HindsightMemoryProvider(MemoryProvider):
             return
         document_id, update_mode = self._resolve_retain_target(self._document_id)
         job = self._make_turn_retain_job(
-            list(self._session_turns), document_id=document_id, update_mode=update_mode, label=label, track_ops=False
+            list(self._session_turns), document_id=document_id, update_mode=update_mode, label=label,
+            track_ops=False,
+            bank_ids=(list(self._write_bank_ids[1:]) if self._fallback_store is not None else list(self._write_bank_ids)),
+            primary_already_written=self._fallback_store is not None,
         )
+        if self._fallback_store is not None:
+            # Session-switch and shutdown flushes must use the same durability boundary as
+            # sync_turn: commit the local transcript and primary outbox intent before network I/O.
+            content = json.dumps(
+                [message for turn in self._session_turns for message in json.loads(turn)], ensure_ascii=False
+            )
+            fallback_document_id = self._document_id
+            fallback_source = f"session:{self._session_id}:{fallback_document_id}"
+            previous = self._fallback_store.get_document(fallback_source)
+            fallback_text = (
+                (previous.text + "\n" if previous else "") + content
+                if update_mode == "append"
+                else content
+            )
+            item_options = dict(job.fallback_item_options)
+            item_options.pop("update_mode", None)
+            operation = self._persist_fallback(
+                fallback_source,
+                fallback_text,
+                bank_id=self._bank_id,
+                remote_document_id=fallback_document_id,
+                document_id=fallback_document_id,
+                remote_payload=fallback_text,
+                expected_remote_text=fallback_text,
+                item_options=item_options,
+            )
+            if operation is not None:
+                job.operation_ids[self._bank_id] = operation.operation_id
+                job.expected_remote_text["value"] = fallback_text
+                extra_job = job
+
+                def job():
+                    if self._replay_fallback_outbox(operation.operation_id):
+                        extra_job()
         # Same writer queue as sync_turn: FIFO behind queued retains, no two threads
         # racing aretain_batch on one document, shutdown drain intact, and a failed flush
         # resent like any other retain.
